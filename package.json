@@ -6,17 +6,17 @@
     "minitouch"
   ],
   "bugs": {
-    "url": "https://github.com/openstf/minitouch/issues"
+    "url": "https://github.com/devicefarmer/minitouch/issues"
   },
   "license": "Apache-2.0",
   "author": {
-    "name": "The OpenSTF Project",
-    "email": "contact@openstf.io",
-    "url": "https://openstf.io"
+    "name": "The DeviceFarmer Project",
+    "email": "support@devicefarmer.com",
+    "url": "https://devicefarmer.github.io/"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/openstf/minitouch.git"
+    "url": "https://github.com/devicefarmer/minitouch.git"
   },
   "scripts": {
     "prepublish": "make"
