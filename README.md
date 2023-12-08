@@ -29,7 +29,7 @@ You'll need to [build](#building) first.
 ### For Android 10 and up
 Minitouch can't handle Android 10 by default, due to a new security policy. The workaround is to forward touch commands to STFService. If you are using minicap standalone (without STF), you need to take care of running the service and agent, before running minicap. Instructions on how to do that can be found [here](https://github.com/openstf/STFService.apk#running-the-service).
 
-### Running minicap
+### Running minitouch
 
 You can then use the included [run.sh](run.sh) script to run the right binary on your device. If you have multiple devices connected, set `ANDROID_SERIAL` before running the script.
 
