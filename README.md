@@ -27,7 +27,7 @@ You should now have the binaries available in `./libs`.
 You'll need to [build](#building) first. 
 
 ### For Android 10 and up
-Minitouch can't handle Android 10 by default, due to a new security policy. The workaround is to forward touch commands to STFService. If you are using minicap standalone (without STF), you need to take care of running the service and agent, before running minicap. Instructions on how to do that can be found [here](https://github.com/openstf/STFService.apk#running-the-service).
+Minitouch can't handle Android 10 by default, due to a new security policy. The workaround is to forward touch commands to STFService. If you are using minitouch standalone (without STF), you need to take care of running the service and agent, before running minitouch. Instructions on how to do that can be found [here](https://github.com/openstf/STFService.apk#running-the-service).
 
 ### Running minitouch
 
