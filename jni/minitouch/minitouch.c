@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -218,31 +219,64 @@ mismatch:
   return 0;
 }
 
+// Order /dev/input/eventN numerically, so that event2 comes before event10.
+// alphasort() would not, and the order matters because consider_device()
+// keeps the incumbent when scores tie. Entries that are not eventN sort
+// last, they never win a tie anyway.
+static int event_index(const char* name)
+{
+  const char* num = strstr(name, "event");
+
+  return num == NULL ? INT_MAX : atoi(num + 5);
+}
+
+static int compare_event_nodes(const struct dirent** a, const struct dirent** b)
+{
+  int index_a = event_index((*a)->d_name);
+  int index_b = event_index((*b)->d_name);
+
+  if (index_a != index_b)
+  {
+    return index_a < index_b ? -1 : 1;
+  }
+
+  return strcmp((*a)->d_name, (*b)->d_name);
+}
+
 static int walk_devices(const char* path, internal_state_t* state)
 {
-  DIR* dir;
-  struct dirent* ent;
+  struct dirent** namelist;
   char devpath[FILENAME_MAX];
+  int count;
+  int i;
 
-  if ((dir = opendir(path)) == NULL)
+  // scandir() rather than readdir(), because readdir() returns entries in
+  // filesystem order. Several touch devices can score the same, and since
+  // consider_device() keeps the incumbent on a tie, an unordered walk lets
+  // the kernel decide which touch device we end up using. Emulators expose
+  // one virtio_input_multi_touch_N per possible display, all scoring alike,
+  // so the walk can settle on a display that does not exist and silently
+  // swallow every event. Visiting them in order picks the lowest numbered,
+  // that is the primary display's, device instead.
+  if ((count = scandir(path, &namelist, NULL, compare_event_nodes)) < 0)
   {
-    perror("opendir");
+    perror("scandir");
     return -1;
   }
 
-  while ((ent = readdir(dir)) != NULL)
+  for (i = 0; i < count; i++)
   {
-    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+    if (strcmp(namelist[i]->d_name, ".") != 0 && strcmp(namelist[i]->d_name, "..") != 0)
     {
-      continue;
+      snprintf(devpath, FILENAME_MAX, "%s/%s", path, namelist[i]->d_name);
+
+      consider_device(devpath, state);
     }
 
-    snprintf(devpath, FILENAME_MAX, "%s/%s", path, ent->d_name);
-
-    consider_device(devpath, state);
+    free(namelist[i]);
   }
 
-  closedir(dir);
+  free(namelist);
 
   return 0;
 }
