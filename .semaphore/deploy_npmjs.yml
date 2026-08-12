@@ -1,14 +1,14 @@
 version: v1.0
-name: NPM Test
+name: Deploy to npmjs
 agent:
   machine:
     type: e1-standard-2
     os_image: ubuntu2204
 blocks:
-  - name: Test
+  - name: Deploy to npmjs
     task:
       jobs:
-        - name: Test
+        - name: Deploy
           commands:
             - checkout
             - git submodule init
@@ -22,13 +22,8 @@ blocks:
             - yes | sdkmanager "ndk;26.3.11579264"
             - export PATH=$PATH:~/android-sdk/ndk/26.3.11579264/
             - sem-version node 12
-            - cache restore
+            - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
             - npm install
-            - cache store
-            - npm run build --if-present
-            - npm test
-promotions:
-  - name: Deploy to npmjs
-    pipeline_file: deploy_npmjs.yml
-    auto_promote:
-      when: tag =~ '.*' AND result = 'passed'
+            - npm publish --access=public
+      secrets:
+        - name: npmjs
