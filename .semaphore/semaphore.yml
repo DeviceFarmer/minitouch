@@ -19,8 +19,8 @@ blocks:
             - unzip ~/android-commandline-tools.zip -d ~/android-sdk/cmdline-tools/
             - mv ~/android-sdk/cmdline-tools/cmdline-tools/ ~/android-sdk/cmdline-tools/latest
             - export PATH=$PATH:~/android-sdk/cmdline-tools/latest/bin
-            - yes | sdkmanager "ndk;26.3.11579264"
-            - export PATH=$PATH:~/android-sdk/ndk/26.3.11579264/
+            - yes | sdkmanager "ndk;29.0.14206865"
+            - export PATH=$PATH:~/android-sdk/ndk/29.0.14206865/
             - sem-version node 12
             - cache restore
             - npm install
