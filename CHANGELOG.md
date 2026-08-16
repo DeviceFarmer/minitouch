@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3.2] - 2026-08-16
+
+### Changed
+- Bump Android NDK used by CI from `26.3.11579264` to `29.0.14206865`
+
 ## [1.3.1] - 2026-08-12
 
 ### Added
