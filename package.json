@@ -16,7 +16,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/devicefarmer/minitouch.git"
+    "url": "git+https://github.com/DeviceFarmer/minitouch.git"
   },
   "scripts": {
     "prepublish": "make"
