@@ -1,5 +1,6 @@
 /.editorconfig
 /.env
+/.github/
 /.gitmodules
 /.npmignore
 /*.tgz
