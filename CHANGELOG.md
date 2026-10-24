@@ -1,13 +1,11 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
-
-## [1.3.2] - 2026-08-16
+## 1.3.2 (2026-08-16)
 
 ### Changed
 - Bump Android NDK used by CI from `26.3.11579264` to `29.0.14206865`
 
-## [1.3.1] - 2026-08-12
+## 1.3.1 (2026-08-12)
 
 ### Added
 - Automated npm publish pipeline: pushing a git tag now triggers a Semaphore
@@ -24,6 +22,6 @@ All notable changes to this project are documented in this file.
 - Migrated to GitHub-native Dependabot (#4)
 - Updated project branding and namespace to `devicefarmer` (#11)
 
-## [1.3.0] - 2020-02-01
+## 1.3.0 (2020-02-01)
 
 Initial release under the `@devicefarmer/minitouch-prebuilt` package name.
