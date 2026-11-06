@@ -139,8 +139,13 @@ static int type_a_touch_panic_reset_all(internal_state_t* state)
     switch (state->contacts[contact].enabled)
     {
       case 1: // WENT_DOWN
+        // Never reported, so there is nothing to lift. Turning it into
+        // WENT_UP would take it off active_contacts without it ever having
+        // been added.
+        state->contacts[contact].enabled = 0;
+        break;
       case 2: // MOVED
-        // Force everything to WENT_UP
+        // Force everything that is down to WENT_UP
         state->contacts[contact].enabled = 3;
         break;
     }
@@ -151,7 +156,7 @@ static int type_a_touch_panic_reset_all(internal_state_t* state)
 
 static int type_a_touch_down(internal_state_t* state, int contact, int x, int y, int pressure)
 {
-  if (contact >= state->max_contacts)
+  if (contact < 0 || contact >= state->max_contacts)
   {
     return 0;
   }
@@ -171,12 +176,18 @@ static int type_a_touch_down(internal_state_t* state, int contact, int x, int y,
 
 static int type_a_touch_move(internal_state_t* state, int contact, int x, int y, int pressure)
 {
-  if (contact >= state->max_contacts || !state->contacts[contact].enabled)
+  if (contact < 0 || contact >= state->max_contacts || !state->contacts[contact].enabled)
   {
     return 0;
   }
 
-  state->contacts[contact].enabled = 2;
+  // A contact whose down has not been committed yet stays WENT_DOWN, or the
+  // commit would never count it.
+  if (state->contacts[contact].enabled != 1)
+  {
+    state->contacts[contact].enabled = 2;
+  }
+
   state->contacts[contact].x = x;
   state->contacts[contact].y = y;
   state->contacts[contact].pressure = pressure;
@@ -186,12 +197,15 @@ static int type_a_touch_move(internal_state_t* state, int contact, int x, int y,
 
 static int type_a_touch_up(internal_state_t* state, int contact)
 {
-  if (contact >= state->max_contacts || !state->contacts[contact].enabled)
+  if (contact < 0 || contact >= state->max_contacts || !state->contacts[contact].enabled)
   {
     return 0;
   }
 
-  state->contacts[contact].enabled = 3;
+  // Lifting a contact whose down has not been committed yet just drops it,
+  // since it was never reported or counted.
+  state->contacts[contact].enabled =
+    state->contacts[contact].enabled == 1 ? 0 : 3;
 
   return 1;
 }
@@ -203,26 +217,33 @@ static int type_b_commit(internal_state_t* state)
   return 1;
 }
 
+static int type_b_touch_up(internal_state_t* state, int contact);
+
 static int type_b_touch_panic_reset_all(internal_state_t* state)
 {
   int contact;
-  int found_any = 0;
 
   for (contact = 0; contact < state->max_contacts; ++contact)
   {
+    // Lift every contact properly, so that the device gets the slot's
+    // tracking ID -1 (and BTN_TOUCH 0 for the last one) and active_contacts
+    // goes back down. Just forgetting them would leave them down on the
+    // device and active_contacts too high.
     if (state->contacts[contact].enabled)
     {
-      state->contacts[contact].enabled = 0;
-      found_any = 1;
+      type_b_touch_up(state, contact);
     }
   }
 
-  return found_any ? type_b_commit(state) : 1;
+  // Commit even if nothing was down any more, as events are written straight
+  // away and uncommitted ones (say "u 0" without "c") would otherwise stay
+  // pending.
+  return type_b_commit(state);
 }
 
 static int type_b_touch_down(internal_state_t* state, int contact, int x, int y, int pressure)
 {
-  if (contact >= state->max_contacts)
+  if (contact < 0 || contact >= state->max_contacts)
   {
     return 0;
   }
@@ -261,7 +282,7 @@ static int type_b_touch_down(internal_state_t* state, int contact, int x, int y,
 
 static int type_b_touch_move(internal_state_t* state, int contact, int x, int y, int pressure)
 {
-  if (contact >= state->max_contacts || !state->contacts[contact].enabled)
+  if (contact < 0 || contact >= state->max_contacts || !state->contacts[contact].enabled)
   {
     return 0;
   }
@@ -285,12 +306,11 @@ static int type_b_touch_move(internal_state_t* state, int contact, int x, int y,
 
 static int type_b_touch_up(internal_state_t* state, int contact)
 {
-  if (contact >= state->max_contacts || !state->contacts[contact].enabled)
+  if (contact < 0 || contact >= state->max_contacts || !state->contacts[contact].enabled)
   {
     return 0;
   }
 
-  state->contacts[contact].enabled = 0;
   state->contacts[contact].enabled = 0;
   state->active_contacts -= 1;
 
