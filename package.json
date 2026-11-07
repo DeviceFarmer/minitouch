@@ -1,6 +1,6 @@
 {
   "name": "@devicefarmer/minitouch-prebuilt",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "Prebuilt binaries of minitouch.",
   "keywords": [
     "minitouch"
