@@ -21,6 +21,9 @@ jobs:
         with:
           submodules: true
 
+      - name: Test
+        run: make test
+
       # Same pin as release.yml, so CI builds what gets published.
       - name: Install the NDK
         run: |

@@ -6,3 +6,4 @@
 /prebuilt/
 /temp/
 package-lock.json
+/test/touch_test

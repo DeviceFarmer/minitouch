@@ -1,4 +1,6 @@
-.PHONY: default clean prebuilt
+.PHONY: default clean prebuilt test
+
+HOST_CC ?= cc
 
 NDKBUILT := \
   libs/arm64-v8a/minitouch \
@@ -15,6 +17,7 @@ default: prebuilt
 clean:
 	ndk-build clean
 	rm -rf prebuilt
+	rm -f test/touch_test
 
 $(NDKBUILT):
 	ndk-build
@@ -39,3 +42,10 @@ prebuilt/%/bin/minitouch: libs/%/minitouch
 prebuilt/%/bin/minitouch-nopie: libs/%/minitouch-nopie
 	mkdir -p $(@D)
 	cp $^ $@
+
+# Checks the contact state machine on the host, no device or NDK needed.
+test: test/touch_test
+	./test/touch_test
+
+test/touch_test: test/touch_test.c test/include/linux/types.h jni/minitouch/touch.c jni/minitouch/touch.h
+	$(HOST_CC) -Wall -Wextra -Werror -Itest/include -Ijni/vendor/libevdev/source/include -Ijni/minitouch -o $@ test/touch_test.c jni/minitouch/touch.c

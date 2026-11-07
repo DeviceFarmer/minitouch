@@ -97,6 +97,8 @@ The minitouch protocol is based on LF-separated lines. Each line is a separate c
 
 When you first open a connection to the socket, you'll receive a header with metadata which you'll need to read from the socket. Other than that there will be no responses of any kind.
 
+When the connection closes (or the input file ends, in stdin/file mode), minitouch lifts any contacts that are still down, as if you had sent `r`. This only applies when minitouch drives the touch device itself, not when it forwards commands to STFService's `minitouchagent`.
+
 ### Readable from the socket
 
 #### `v <version>`
