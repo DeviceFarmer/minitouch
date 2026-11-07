@@ -343,6 +343,10 @@ static void io_handler(FILE* input, FILE* output, internal_state_t* state)
     read_buffer[strcspn(read_buffer, "\r\n")] = 0;
     parse_input(read_buffer, state);
   }
+
+  // Lift whatever the client left down, say if it went away in the middle
+  // of a gesture, so that the next client starts with nothing down.
+  touch_panic_reset_all(state);
 }
 
 static void proxy_handler(FILE* input, FILE* output, int proxy_fd)
