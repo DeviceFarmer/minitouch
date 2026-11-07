@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.3 (2026-11-07)
+
+* Keep active_contacts in step with the contacts that are down by @koral-- in https://github.com/DeviceFarmer/minitouch/pull/29
+
+**Full Changelog**: https://github.com/DeviceFarmer/minitouch/compare/v1.3.2...v1.3.3
+
 ## 1.3.2 (2026-08-16)
 
 ### Changed
