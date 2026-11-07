@@ -1,10 +1,13 @@
 // Host test for the contact state machine in jni/minitouch/touch.c.
 //
 // Runs command sequences against a fake device (a temporary file standing in
-// for the evdev node), replays the events written to it the way the kernel
-// would see them, and after every commit or reset checks that
-// state->active_contacts, minitouch's own contact states and what the kernel
-// was told all agree, and that BTN_TOUCH is down exactly while contacts are.
+// for the evdev node) and replays the events written to it the way the
+// kernel and Android's InputReader would see them. Alongside, it keeps track
+// of which contacts the client asked to be down. After every commit or reset
+// it checks that the client's view, minitouch's own contact states,
+// state->active_contacts and what the device was told all agree, contact by
+// contact where the protocol allows, and that BTN_TOUCH is down exactly
+// while contacts are.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,12 +24,16 @@ typedef struct
   int has_mtslot;
   int has_tracking_id;
   int max_contacts;
+  int has_key_btn_touch;
 } config_t;
 
 static const config_t configs[] = {
-  {"type B", 1, 1, 10},
-  {"type A with tracking IDs", 0, 1, 10},
-  {"type A without tracking IDs", 0, 0, 2},
+  {"type B", 1, 1, 10, 1},
+  {"type B without BTN_TOUCH", 1, 1, 10, 0},
+  {"type A with tracking IDs", 0, 1, 10, 1},
+  {"type A with tracking IDs, without BTN_TOUCH", 0, 1, 10, 0},
+  {"type A without tracking IDs", 0, 0, 2, 1},
+  {"type A without tracking IDs or BTN_TOUCH", 0, 0, 2, 0},
 };
 
 typedef struct
@@ -34,13 +41,20 @@ typedef struct
   internal_state_t state;
   FILE* device;
   off_t read_offset;
-  // The kernel's view, rebuilt from the written events.
+  // The contacts the client asked to be down.
+  int client_down[MAX_SUPPORTED_CONTACTS];
+  // The device's view, rebuilt from the written events.
+  int frame_events;    // events written since the last SYN_REPORT
   int btn_touch;
   int slot;
   int slot_tracking_id[MAX_SUPPORTED_CONTACTS];
-  int frame_contacts;  // type A: contacts with a position in the frame so far
-  int has_position;    // type A: the current contact had a position
+  int in_contact;      // type A: an ABS_MT_* event started a contact
+  int has_x, has_y;    // type A: the current contact has a position
+  int tracking_id;     // type A: the current contact's tracking ID
+  int frame_contacts;  // type A: contacts in the frame so far
+  int frame_ids[MAX_SUPPORTED_CONTACTS]; // type A: their tracking IDs
   int reported_down;   // contacts down as of the last SYN_REPORT
+  int reported_ids[MAX_SUPPORTED_CONTACTS]; // type A: their tracking IDs
   char error[200];
 } harness_t;
 
@@ -58,17 +72,37 @@ static void harness_init(harness_t* h, const config_t* config)
   h->state.fd = fileno(h->device);
   h->state.has_mtslot = config->has_mtslot;
   h->state.has_tracking_id = config->has_tracking_id;
-  h->state.has_key_btn_touch = 1;
+  h->state.has_key_btn_touch = config->has_key_btn_touch;
   h->state.has_pressure = 1;
   h->state.max_contacts = config->max_contacts;
   for (i = 0; i < MAX_SUPPORTED_CONTACTS; ++i)
     h->slot_tracking_id[i] = -1;
+  h->tracking_id = -1;
 }
 
 static void fail(harness_t* h, const char* message)
 {
   if (h->error[0] == 0)
     snprintf(h->error, sizeof(h->error), "%s", message);
+}
+
+static void end_type_a_contact(harness_t* h)
+{
+  if (!h->in_contact)
+    return;
+
+  // Android's MultiTouchMotionAccumulator takes any ABS_MT_* event as a
+  // contact, so one without a position would be a touch at 0,0.
+  if (!h->has_x || !h->has_y)
+    fail(h, "type A contact without a position");
+
+  if (h->state.has_tracking_id && h->tracking_id >= 0
+    && h->tracking_id < MAX_SUPPORTED_CONTACTS)
+    h->frame_ids[h->tracking_id] = 1;
+
+  h->frame_contacts += 1;
+  h->in_contact = h->has_x = h->has_y = 0;
+  h->tracking_id = -1;
 }
 
 static void replay(harness_t* h)
@@ -79,32 +113,18 @@ static void replay(harness_t* h)
   {
     h->read_offset += sizeof(ev);
 
-    if (ev.type == EV_KEY && ev.code == BTN_TOUCH)
-    {
-      if (ev.value == h->btn_touch)
-        fail(h, "BTN_TOUCH sent twice with the same value");
-      h->btn_touch = ev.value;
-    }
-    else if (ev.type == EV_ABS && ev.code == ABS_MT_SLOT)
-    {
-      h->slot = ev.value;
-    }
-    else if (ev.type == EV_ABS && ev.code == ABS_MT_TRACKING_ID && h->state.has_mtslot)
-    {
-      h->slot_tracking_id[h->slot] = ev.value;
-    }
-    else if (ev.type == EV_ABS && ev.code == ABS_MT_POSITION_X)
-    {
-      h->has_position = 1;
-    }
-    else if (ev.type == EV_SYN && ev.code == SYN_MT_REPORT)
-    {
-      h->frame_contacts += h->has_position;
-      h->has_position = 0;
-    }
-    else if (ev.type == EV_SYN && ev.code == SYN_REPORT)
+    if (ev.type == EV_SYN && ev.code == SYN_REPORT)
     {
       int i;
+
+      // The input core drops a SYN_REPORT with nothing before it, so such a
+      // frame never reaches Android. minitouch should not write one either.
+      if (h->frame_events == 0)
+      {
+        fail(h, "empty frame written");
+        continue;
+      }
+      h->frame_events = 0;
 
       if (h->state.has_mtslot)
       {
@@ -114,9 +134,46 @@ static void replay(harness_t* h)
       }
       else
       {
+        end_type_a_contact(h);
         h->reported_down = h->frame_contacts;
         h->frame_contacts = 0;
+        memcpy(h->reported_ids, h->frame_ids, sizeof(h->reported_ids));
+        memset(h->frame_ids, 0, sizeof(h->frame_ids));
       }
+      continue;
+    }
+
+    h->frame_events += 1;
+
+    if (ev.type == EV_KEY && ev.code == BTN_TOUCH)
+    {
+      if (!h->state.has_key_btn_touch)
+        fail(h, "BTN_TOUCH sent to a device without it");
+      if (ev.value == h->btn_touch)
+        fail(h, "BTN_TOUCH sent twice with the same value");
+      h->btn_touch = ev.value;
+    }
+    else if (ev.type == EV_SYN && ev.code == SYN_MT_REPORT)
+    {
+      end_type_a_contact(h);
+    }
+    else if (ev.type == EV_ABS && h->state.has_mtslot)
+    {
+      if (ev.code == ABS_MT_SLOT)
+        h->slot = ev.value;
+      else if (ev.code == ABS_MT_TRACKING_ID)
+        h->slot_tracking_id[h->slot] = ev.value;
+    }
+    else if (ev.type == EV_ABS && ev.code >= ABS_MT_TOUCH_MAJOR
+      && ev.code <= ABS_MT_TOOL_Y)
+    {
+      h->in_contact = 1;
+      if (ev.code == ABS_MT_POSITION_X)
+        h->has_x = 1;
+      else if (ev.code == ABS_MT_POSITION_Y)
+        h->has_y = 1;
+      else if (ev.code == ABS_MT_TRACKING_ID)
+        h->tracking_id = ev.value;
     }
   }
 }
@@ -126,13 +183,49 @@ static void check(harness_t* h)
   char message[200];
   int contact;
   int own_down = 0;
+  int client_down = 0;
 
   for (contact = 0; contact < h->state.max_contacts; ++contact)
   {
     contact_status_t status = h->state.contacts[contact].status;
     // Type A only reports a contact on commit, so a pending down is not down
     // yet and a pending up still is. Type B never has pending states.
-    own_down += status == CONTACT_DOWN || status == CONTACT_UP_PENDING;
+    int down = status == CONTACT_DOWN || status == CONTACT_UP_PENDING;
+
+    own_down += down;
+    client_down += h->client_down[contact];
+
+    if (status == CONTACT_DOWN_PENDING || status == CONTACT_UP_PENDING)
+    {
+      snprintf(message, sizeof(message),
+        "contact %d is still pending after a commit", contact);
+      fail(h, message);
+    }
+
+    if (down != h->client_down[contact])
+    {
+      snprintf(message, sizeof(message),
+        "contact %d is %s but the client asked for it to be %s",
+        contact, down ? "down" : "up", h->client_down[contact] ? "down" : "up");
+      fail(h, message);
+    }
+
+    // Type A without tracking IDs can only be checked by count, below.
+    if (h->state.has_mtslot || h->state.has_tracking_id)
+    {
+      int device_down = h->state.has_mtslot
+        ? h->slot_tracking_id[contact] != -1
+        : h->reported_ids[contact];
+
+      if (device_down != h->client_down[contact])
+      {
+        snprintf(message, sizeof(message),
+          "the device has contact %d %s but the client asked for it to be %s",
+          contact, device_down ? "down" : "up",
+          h->client_down[contact] ? "down" : "up");
+        fail(h, message);
+      }
+    }
   }
 
   if (h->state.active_contacts != own_down)
@@ -143,24 +236,52 @@ static void check(harness_t* h)
     fail(h, message);
   }
 
-  if (h->reported_down != own_down)
+  if (h->reported_down != client_down)
   {
     snprintf(message, sizeof(message),
-      "%d contacts are down but the device was told %d",
-      own_down, h->reported_down);
+      "the client has %d contacts down but the device was told %d",
+      client_down, h->reported_down);
     fail(h, message);
   }
 
-  if (h->btn_touch != (own_down > 0))
+  if (h->btn_touch != (h->state.has_key_btn_touch && client_down > 0))
   {
     snprintf(message, sizeof(message),
-      "BTN_TOUCH is %d with %d contacts down", h->btn_touch, own_down);
+      "BTN_TOUCH is %d with %d contacts down", h->btn_touch, client_down);
     fail(h, message);
   }
 }
 
-static void run_command(harness_t* h, char command, int contact)
+// What the client expects a command to do, whatever the protocol: a down on
+// a contact that is already down resets everything first, moves and ups on
+// a contact that is up are ignored, and so are contacts out of range.
+static void update_client_view(harness_t* h, char command, long contact)
 {
+  int in_range = contact >= 0 && contact < h->state.max_contacts;
+
+  switch (command)
+  {
+    case 'd':
+      if (!in_range)
+        break;
+      if (h->client_down[contact])
+        memset(h->client_down, 0, sizeof(h->client_down));
+      h->client_down[contact] = 1;
+      break;
+    case 'u':
+      if (in_range)
+        h->client_down[contact] = 0;
+      break;
+    case 'r':
+      memset(h->client_down, 0, sizeof(h->client_down));
+      break;
+  }
+}
+
+static void run_command(harness_t* h, char command, long contact)
+{
+  update_client_view(h, command, contact);
+
   switch (command)
   {
     case 'd':
@@ -198,18 +319,13 @@ static int run_script(const config_t* config, const char* script, char* error, s
   while (*p && h.error[0] == 0)
   {
     char command = *p++;
-    int contact = 0;
+    long contact = 0;
 
     if (command == ' ')
       continue;
 
-    if (*p == '-' && p[1] >= '0' && p[1] <= '9')
-    {
-      contact = -(p[1] - '0');
-      p += 2;
-    }
-    else if (*p >= '0' && *p <= '9')
-      contact = *p++ - '0';
+    if (command == 'd' || command == 'm' || command == 'u')
+      contact = strtol(p, (char**) &p, 10);
 
     run_command(&h, command, contact);
   }
@@ -239,7 +355,15 @@ static const struct
   {"up before the down was committed", "d0 u0 c d0 c u0 c"},
   {"move before the down was committed", "d0 m0 c u0 c d0 c u0 c"},
   {"move after an uncommitted up", "d0 c u0 m0 c u0 c"},
+  {"up twice", "d0 c u0 u0 c d0 c u0 c"},
+  {"lift one of two contacts", "d0 c d1 c u0 c m1 c u1 c"},
+  {"lift and touch again in one frame", "d0 c d1 c u0 d0 c m1 c u1 c u0 c"},
+  {"lift and touch again in one frame, alone", "d0 c u0 d0 c u0 c"},
+  {"reset with nothing down", "r d0 c u0 c r c"},
+  {"commit with nothing to send", "c d0 c u0 c c"},
   {"negative contact", "d-1 c m-1 c u-1 c d0 c u0 c"},
+  {"contact out of range", "d10 c m10 c u10 c d0 c u0 c"},
+  {"contact out of range of an int", "d0 c d4294967296 c u4294967296 c u0 c"},
 };
 
 int main(void)
@@ -261,12 +385,17 @@ int main(void)
       }
     }
 
-    // Random sequences over three contacts (one more than type A without
-    // tracking IDs supports, so out of range contacts are covered too).
+    // Random sequences, mostly over three contacts (one more than type A
+    // without tracking IDs supports), with the odd contact that is out of
+    // range or only in range once narrowed to an int.
     for (seed = 1; seed <= 2000; ++seed)
     {
       static const char commands[] = "dddmmuuucccr";
-      char script[3 * 40 + 1];
+      const long contacts[] = {
+        0, 1, 2, 0, 1, 2, 0, 1, 2,
+        -1, configs[c].max_contacts - 1, configs[c].max_contacts, 4294967296L,
+      };
+      char script[40 * 14 + 1];
       char* p = script;
       int i;
 
@@ -276,7 +405,8 @@ int main(void)
         char command = commands[rand() % (sizeof(commands) - 1)];
         *p++ = command;
         if (command == 'd' || command == 'm' || command == 'u')
-          *p++ = '0' + rand() % 3;
+          p += sprintf(p, "%ld",
+            contacts[rand() % (sizeof(contacts) / sizeof(contacts[0]))]);
         *p++ = ' ';
       }
       *p = 0;

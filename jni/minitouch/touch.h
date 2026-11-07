@@ -52,11 +52,13 @@ typedef struct
   int tracking_id;
   contact_t contacts[MAX_SUPPORTED_CONTACTS];
   int active_contacts;
+  // Events were written since the last SYN_REPORT.
+  int uncommitted;
 } internal_state_t;
 
-int touch_down(internal_state_t* state, int contact, int x, int y, int pressure);
-int touch_move(internal_state_t* state, int contact, int x, int y, int pressure);
-int touch_up(internal_state_t* state, int contact);
+int touch_down(internal_state_t* state, long contact, int x, int y, int pressure);
+int touch_move(internal_state_t* state, long contact, int x, int y, int pressure);
+int touch_up(internal_state_t* state, long contact);
 int touch_panic_reset_all(internal_state_t* state);
 int commit(internal_state_t* state);
 
