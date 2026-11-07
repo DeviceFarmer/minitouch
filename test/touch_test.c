@@ -129,10 +129,10 @@ static void check(harness_t* h)
 
   for (contact = 0; contact < h->state.max_contacts; ++contact)
   {
-    int enabled = h->state.contacts[contact].enabled;
-    // Type A only reports a contact on commit, so a pending down (1) is not
-    // down yet. Type B reports it straight away.
-    own_down += h->state.has_mtslot ? enabled != 0 : enabled >= 2;
+    contact_status_t status = h->state.contacts[contact].status;
+    // Type A only reports a contact on commit, so a pending down is not down
+    // yet and a pending up still is. Type B never has pending states.
+    own_down += status == CONTACT_DOWN || status == CONTACT_UP_PENDING;
   }
 
   if (h->state.active_contacts != own_down)

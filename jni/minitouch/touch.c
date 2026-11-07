@@ -55,9 +55,9 @@ static int type_a_commit(internal_state_t* state)
 
   for (contact = 0; contact < state->max_contacts; ++contact)
   {
-    switch (state->contacts[contact].enabled)
+    switch (state->contacts[contact].status)
     {
-      case 1: // WENT_DOWN
+      case CONTACT_DOWN_PENDING:
         found_any = 1;
 
         state->active_contacts += 1;
@@ -83,9 +83,9 @@ static int type_a_commit(internal_state_t* state)
 
         WRITE_EVENT(state, EV_SYN, SYN_MT_REPORT, 0);
 
-        state->contacts[contact].enabled = 2;
+        state->contacts[contact].status = CONTACT_DOWN;
         break;
-      case 2: // MOVED
+      case CONTACT_DOWN:
         found_any = 1;
 
         if (state->has_tracking_id)
@@ -105,7 +105,7 @@ static int type_a_commit(internal_state_t* state)
 
         WRITE_EVENT(state, EV_SYN, SYN_MT_REPORT, 0);
         break;
-      case 3: // WENT_UP
+      case CONTACT_UP_PENDING:
         found_any = 1;
 
         state->active_contacts -= 1;
@@ -119,7 +119,9 @@ static int type_a_commit(internal_state_t* state)
 
         WRITE_EVENT(state, EV_SYN, SYN_MT_REPORT, 0);
 
-        state->contacts[contact].enabled = 0;
+        state->contacts[contact].status = CONTACT_UP;
+        break;
+      case CONTACT_UP:
         break;
     }
   }
@@ -136,17 +138,20 @@ static int type_a_touch_panic_reset_all(internal_state_t* state)
 
   for (contact = 0; contact < state->max_contacts; ++contact)
   {
-    switch (state->contacts[contact].enabled)
+    switch (state->contacts[contact].status)
     {
-      case 1: // WENT_DOWN
+      case CONTACT_DOWN_PENDING:
         // Never reported, so there is nothing to lift. Turning it into
-        // WENT_UP would take it off active_contacts without it ever having
-        // been added.
-        state->contacts[contact].enabled = 0;
+        // CONTACT_UP_PENDING would take it off active_contacts without it
+        // ever having been added.
+        state->contacts[contact].status = CONTACT_UP;
         break;
-      case 2: // MOVED
-        // Force everything that is down to WENT_UP
-        state->contacts[contact].enabled = 3;
+      case CONTACT_DOWN:
+        // Force everything that is down to go up
+        state->contacts[contact].status = CONTACT_UP_PENDING;
+        break;
+      case CONTACT_UP:
+      case CONTACT_UP_PENDING:
         break;
     }
   }
@@ -161,12 +166,12 @@ static int type_a_touch_down(internal_state_t* state, int contact, int x, int y,
     return 0;
   }
 
-  if (state->contacts[contact].enabled)
+  if (state->contacts[contact].status != CONTACT_UP)
   {
     type_a_touch_panic_reset_all(state);
   }
 
-  state->contacts[contact].enabled = 1;
+  state->contacts[contact].status = CONTACT_DOWN_PENDING;
   state->contacts[contact].x = x;
   state->contacts[contact].y = y;
   state->contacts[contact].pressure = pressure;
@@ -176,16 +181,17 @@ static int type_a_touch_down(internal_state_t* state, int contact, int x, int y,
 
 static int type_a_touch_move(internal_state_t* state, int contact, int x, int y, int pressure)
 {
-  if (contact < 0 || contact >= state->max_contacts || !state->contacts[contact].enabled)
+  if (contact < 0 || contact >= state->max_contacts
+    || state->contacts[contact].status == CONTACT_UP)
   {
     return 0;
   }
 
-  // A contact whose down has not been committed yet stays WENT_DOWN, or the
+  // A contact whose down has not been committed yet stays pending, or the
   // commit would never count it.
-  if (state->contacts[contact].enabled != 1)
+  if (state->contacts[contact].status != CONTACT_DOWN_PENDING)
   {
-    state->contacts[contact].enabled = 2;
+    state->contacts[contact].status = CONTACT_DOWN;
   }
 
   state->contacts[contact].x = x;
@@ -197,15 +203,17 @@ static int type_a_touch_move(internal_state_t* state, int contact, int x, int y,
 
 static int type_a_touch_up(internal_state_t* state, int contact)
 {
-  if (contact < 0 || contact >= state->max_contacts || !state->contacts[contact].enabled)
+  if (contact < 0 || contact >= state->max_contacts
+    || state->contacts[contact].status == CONTACT_UP)
   {
     return 0;
   }
 
   // Lifting a contact whose down has not been committed yet just drops it,
   // since it was never reported or counted.
-  state->contacts[contact].enabled =
-    state->contacts[contact].enabled == 1 ? 0 : 3;
+  state->contacts[contact].status =
+    state->contacts[contact].status == CONTACT_DOWN_PENDING
+      ? CONTACT_UP : CONTACT_UP_PENDING;
 
   return 1;
 }
@@ -217,7 +225,26 @@ static int type_b_commit(internal_state_t* state)
   return 1;
 }
 
-static int type_b_touch_up(internal_state_t* state, int contact);
+static int type_b_touch_up(internal_state_t* state, int contact)
+{
+  if (contact < 0 || contact >= state->max_contacts
+    || state->contacts[contact].status == CONTACT_UP)
+  {
+    return 0;
+  }
+
+  state->contacts[contact].status = CONTACT_UP;
+  state->active_contacts -= 1;
+
+  WRITE_EVENT(state, EV_ABS, ABS_MT_SLOT, contact);
+  WRITE_EVENT(state, EV_ABS, ABS_MT_TRACKING_ID, -1);
+
+  // Send BTN_TOUCH only when no contacts remain.
+  if (state->active_contacts == 0 && state->has_key_btn_touch)
+    WRITE_EVENT(state, EV_KEY, BTN_TOUCH, 0);
+
+  return 1;
+}
 
 static int type_b_touch_panic_reset_all(internal_state_t* state)
 {
@@ -229,7 +256,7 @@ static int type_b_touch_panic_reset_all(internal_state_t* state)
     // tracking ID -1 (and BTN_TOUCH 0 for the last one) and active_contacts
     // goes back down. Just forgetting them would leave them down on the
     // device and active_contacts too high.
-    if (state->contacts[contact].enabled)
+    if (state->contacts[contact].status != CONTACT_UP)
     {
       type_b_touch_up(state, contact);
     }
@@ -248,12 +275,12 @@ static int type_b_touch_down(internal_state_t* state, int contact, int x, int y,
     return 0;
   }
 
-  if (state->contacts[contact].enabled)
+  if (state->contacts[contact].status != CONTACT_UP)
   {
     type_b_touch_panic_reset_all(state);
   }
 
-  state->contacts[contact].enabled = 1;
+  state->contacts[contact].status = CONTACT_DOWN;
   state->contacts[contact].tracking_id = next_tracking_id(state);
   state->active_contacts += 1;
 
@@ -282,7 +309,8 @@ static int type_b_touch_down(internal_state_t* state, int contact, int x, int y,
 
 static int type_b_touch_move(internal_state_t* state, int contact, int x, int y, int pressure)
 {
-  if (contact < 0 || contact >= state->max_contacts || !state->contacts[contact].enabled)
+  if (contact < 0 || contact >= state->max_contacts
+    || state->contacts[contact].status == CONTACT_UP)
   {
     return 0;
   }
@@ -300,26 +328,6 @@ static int type_b_touch_move(internal_state_t* state, int contact, int x, int y,
 
   WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, x);
   WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, y);
-
-  return 1;
-}
-
-static int type_b_touch_up(internal_state_t* state, int contact)
-{
-  if (contact < 0 || contact >= state->max_contacts || !state->contacts[contact].enabled)
-  {
-    return 0;
-  }
-
-  state->contacts[contact].enabled = 0;
-  state->active_contacts -= 1;
-
-  WRITE_EVENT(state, EV_ABS, ABS_MT_SLOT, contact);
-  WRITE_EVENT(state, EV_ABS, ABS_MT_TRACKING_ID, -1);
-
-  // Send BTN_TOUCH only when no contacts remain.
-  if (state->active_contacts == 0 && state->has_key_btn_touch)
-    WRITE_EVENT(state, EV_KEY, BTN_TOUCH, 0);
 
   return 1;
 }

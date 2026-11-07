@@ -10,9 +10,21 @@ struct libevdev;
 
 extern int g_verbose;
 
+typedef enum
+{
+  CONTACT_UP = 0,
+  // Type A only: down, but not reported (committed) yet.
+  CONTACT_DOWN_PENDING,
+  // Down. Type B reports a down straight away, so it only ever uses this
+  // and CONTACT_UP.
+  CONTACT_DOWN,
+  // Type A only: lifted, but still reported as down until the next commit.
+  CONTACT_UP_PENDING,
+} contact_status_t;
+
 typedef struct
 {
-  int enabled;
+  contact_status_t status;
   int tracking_id;
   int x;
   int y;

@@ -524,7 +524,7 @@ int main(int argc, char* argv[])
     int contact;
     for (contact = 0; contact < MAX_SUPPORTED_CONTACTS; ++contact)
     {
-      state.contacts[contact].enabled = 0;
+      state.contacts[contact].status = CONTACT_UP;
     }
 
     fprintf(stderr,
